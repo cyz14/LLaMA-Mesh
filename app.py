@@ -57,7 +57,8 @@ h1 {
 # Load the tokenizer and model
 model_path = "Zhengyi/LLaMA-Mesh"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
-model = AutoModelForCausalLM.from_pretrained(model_path, device_map="auto")
+import torch
+model = AutoModelForCausalLM.from_pretrained(model_path).to("cuda")
 terminators = [
     tokenizer.eos_token_id,
     tokenizer.convert_tokens_to_ids("<|eot_id|>")
@@ -138,17 +139,24 @@ def chat_llama3_8b(message: str,
         conversation.extend([{"role": "user", "content": user}, {"role": "assistant", "content": assistant}])
     conversation.append({"role": "user", "content": message})
 
-    input_ids = tokenizer.apply_chat_template(conversation, return_tensors="pt").to(model.device)
-    
+    inputs = tokenizer.apply_chat_template(conversation, return_tensors="pt")
+    if hasattr(inputs, 'input_ids'):
+        input_ids = inputs.input_ids.to(model.device)
+    else:
+        input_ids = inputs.to(model.device)
+    attention_mask = torch.ones_like(input_ids)
+
     streamer = TextIteratorStreamer(tokenizer, timeout=10.0, skip_prompt=True, skip_special_tokens=True)
 
     generate_kwargs = dict(
-        input_ids= input_ids,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
         streamer=streamer,
         max_new_tokens=max_new_tokens,
         do_sample=True,
         temperature=temperature,
         eos_token_id=terminators,
+        pad_token_id=tokenizer.eos_token_id,
     )
     # This will enforce greedy generation (do_sample=False) when the temperature is passed 0, avoiding the crash.             
     if temperature == 0:
@@ -160,7 +168,7 @@ def chat_llama3_8b(message: str,
     outputs = []
     for text in streamer:
         outputs.append(text)
-        #print(outputs)
+        # print(outputs)
         yield "".join(outputs)
         
 
@@ -235,5 +243,5 @@ with gr.Blocks(fill_height=True, css=css) as demo:
                 )
           
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0")
     
